@@ -10,12 +10,12 @@ import logging
 # ==========================
 
 JENKINS_URL = os.environ.get("JENKINS_URL")
-ADMIN_USER = os.environ.get("ADMIN_USER")
+ADMIN_USER  = os.environ.get("ADMIN_USER")
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")
 
-MODE = os.environ.get("MODE")
+MODE       = os.environ.get("MODE")
 USER_EMAIL = os.environ.get("USER_EMAIL")
-ROLES = os.environ.get("ROLES")
+ROLES      = os.environ.get("ROLES")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -35,7 +35,7 @@ def generate_password(length=14):
 
 def get_crumb():
     crumb_url = f"{JENKINS_URL}/crumbIssuer/api/json"
-    response = requests.get(crumb_url, auth=(ADMIN_USER, ADMIN_TOKEN))
+    response  = requests.get(crumb_url, auth=(ADMIN_USER, ADMIN_TOKEN))
 
     if response.status_code != 200:
         logging.error("Failed to retrieve crumb")
@@ -46,22 +46,35 @@ def get_crumb():
 
 
 # ==========================
+# ✅ CHECK IF USER EXISTS
+# ==========================
+
+def user_exists(username):
+    url      = f"{JENKINS_URL}/user/{username}/api/json"
+    response = requests.get(url, auth=(ADMIN_USER, ADMIN_TOKEN))
+    return response.status_code == 200
+
+
+# ==========================
 # CREATE JENKINS USER
 # ==========================
 
 def create_user(username, password):
+    # ✅ Layer 2: Check against Jenkins before creating
+    if user_exists(username):
+        logging.warning(f"User already exists in Jenkins, skipping: {username}")
+        return False
+
     crumb_field, crumb = get_crumb()
-
-    url = f"{JENKINS_URL}/securityRealm/createAccountByAdmin"
-
+    url     = f"{JENKINS_URL}/securityRealm/createAccountByAdmin"
     headers = {crumb_field: crumb} if crumb else {}
 
     payload = {
-        "username": username,
+        "username" : username,
         "password1": password,
         "password2": password,
-        "fullname": username,
-        "email": f"{username}@pinelabs.com"
+        "fullname" : username,
+        "email"    : f"{username}@pinelabs.com"
     }
 
     response = requests.post(
@@ -73,8 +86,10 @@ def create_user(username, password):
 
     if response.status_code in [200, 302]:
         logging.info(f"User created: {username}")
+        return True
     else:
         logging.error(f"User creation failed: {response.text}")
+        return False
 
 
 # ==========================
@@ -83,15 +98,13 @@ def create_user(username, password):
 
 def assign_role(username, role):
     crumb_field, crumb = get_crumb()
-
-    url = f"{JENKINS_URL}/role-strategy/strategy/assignRole"
-
+    url     = f"{JENKINS_URL}/role-strategy/strategy/assignRole"
     headers = {crumb_field: crumb} if crumb else {}
 
     payload = {
-        "type": "globalRoles",
+        "type"    : "globalRoles",
         "roleName": role,
-        "sid": username
+        "sid"     : username
     }
 
     response = requests.post(
@@ -116,7 +129,6 @@ def store_password_in_path(username, password, role):
 
     try:
         os.makedirs(base_path, exist_ok=True)
-
         file_path = f"{base_path}/{username}.txt"
 
         with open(file_path, "w") as f:
@@ -125,7 +137,6 @@ def store_password_in_path(username, password, role):
             f.write(f"role: {role}\n")
 
         os.chmod(file_path, 0o600)
-
         logging.info(f"Credentials stored at: {file_path}")
 
     except Exception as e:
@@ -142,12 +153,16 @@ def single_mode():
         return
 
     username = USER_EMAIL.split("@")[0]
-    password = generate_password()
 
+    # ✅ Duplicate check for single mode too
+    if user_exists(username):
+        logging.warning(f"User already exists, skipping: {username}")
+        return
+
+    password = generate_password()
     create_user(username, password)
     assign_role(username, ROLES.lower())
     store_password_in_path(username, password, ROLES.lower())
-
     logging.info(f"User created successfully: {username}")
 
 
@@ -157,21 +172,29 @@ def single_mode():
 
 def bulk_mode():
     try:
+        seen_users = set()  # ✅ Layer 1: Track duplicates within CSV
+
         with open("users.csv") as f:
             reader = csv.DictReader(f)
 
             for row in reader:
-                email = row["email"]
-                role = row["roles"]
-
+                email    = row["email"]
+                role     = row["roles"]
                 username = email.split("@")[0]
+
+                # ✅ Layer 1: Skip duplicate rows in CSV
+                if username in seen_users:
+                    logging.warning(f"Duplicate entry in CSV, skipping: {username}")
+                    continue
+                seen_users.add(username)
+
                 password = generate_password()
+                created  = create_user(username, password)
 
-                create_user(username, password)
-                assign_role(username, role.lower())
-                store_password_in_path(username, password, role.lower())
-
-                logging.info(f"User created successfully: {username}")
+                if created:
+                    assign_role(username, role.lower())
+                    store_password_in_path(username, password, role.lower())
+                    logging.info(f"User created successfully: {username}")
 
         logging.info("Bulk onboarding completed.")
 
