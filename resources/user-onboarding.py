@@ -24,9 +24,25 @@ logging.basicConfig(level=logging.INFO)
 # PASSWORD GENERATOR
 # ==========================
 
-def generate_password(length=12):
+def generate_password(length=14):
     chars = string.ascii_letters + string.digits + "!@#$%^&*"
     return ''.join(random.choice(chars) for _ in range(length))
+
+
+# ==========================
+# GET JENKINS CRUMB (CSRF)
+# ==========================
+
+def get_crumb():
+    crumb_url = f"{JENKINS_URL}/crumbIssuer/api/json"
+    response = requests.get(crumb_url, auth=(ADMIN_USER, ADMIN_TOKEN))
+
+    if response.status_code != 200:
+        logging.error("Failed to retrieve crumb")
+        return None, None
+
+    data = response.json()
+    return data["crumbRequestField"], data["crumb"]
 
 
 # ==========================
@@ -34,7 +50,11 @@ def generate_password(length=12):
 # ==========================
 
 def create_user(username, password):
+    crumb_field, crumb = get_crumb()
+
     url = f"{JENKINS_URL}/securityRealm/createAccountByAdmin"
+
+    headers = {crumb_field: crumb} if crumb else {}
 
     payload = {
         "username": username,
@@ -47,6 +67,7 @@ def create_user(username, password):
     response = requests.post(
         url,
         data=payload,
+        headers=headers,
         auth=(ADMIN_USER, ADMIN_TOKEN)
     )
 
@@ -61,7 +82,11 @@ def create_user(username, password):
 # ==========================
 
 def assign_role(username, role):
+    crumb_field, crumb = get_crumb()
+
     url = f"{JENKINS_URL}/role-strategy/strategy/assignRole"
+
+    headers = {crumb_field: crumb} if crumb else {}
 
     payload = {
         "type": "globalRoles",
@@ -72,6 +97,7 @@ def assign_role(username, role):
     response = requests.post(
         url,
         data=payload,
+        headers=headers,
         auth=(ADMIN_USER, ADMIN_TOKEN)
     )
 
@@ -88,9 +114,13 @@ def assign_role(username, role):
 def store_password_as_credential(username, password):
     credential_id = f"user-{username}-cred"
 
+    crumb_field, crumb = get_crumb()
+
     url = f"{JENKINS_URL}/credentials/store/system/domain/_/createCredentials"
 
-    payload = {
+    headers = {crumb_field: crumb} if crumb else {}
+
+    credential_payload = {
         "": "0",
         "credentials": {
             "scope": "GLOBAL",
@@ -101,16 +131,18 @@ def store_password_as_credential(username, password):
         }
     }
 
-    headers = {"Content-Type": "application/json"}
+    data = {
+        "json": json.dumps(credential_payload)
+    }
 
     response = requests.post(
         url,
-        auth=(ADMIN_USER, ADMIN_TOKEN),
         headers=headers,
-        data=json.dumps(payload)
+        data=data,
+        auth=(ADMIN_USER, ADMIN_TOKEN)
     )
 
-    if response.status_code in [200, 201]:
+    if response.status_code in [200, 302]:
         logging.info(f"Credential stored: {credential_id}")
     else:
         logging.error(f"Credential store failed: {response.text}")
