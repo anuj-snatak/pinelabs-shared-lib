@@ -1,27 +1,70 @@
 import os
 import subprocess
+import textwrap
 
 JENKINS_URL = os.getenv("JENKINS_URL", "http://localhost:8080")
 ADMIN_USER = os.getenv("ADMIN_USER", "admin")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 
-def run_cli(command):
-    full_command = f"""
-    java -jar jenkins-cli.jar -s {JENKINS_URL} \
-    -auth {ADMIN_USER}:{ADMIN_TOKEN} {command}
-    """
-    subprocess.run(full_command, shell=True)
+groovy_script = """
+import jenkins.model.*
+import hudson.security.*
+import com.michelin.cio.hudson.plugins.rolestrategy.*
 
-# GLOBAL ROLES
-run_cli('add-role global admin -p ".*"')
-run_cli('add-role global devops -p ".*"')
-run_cli('add-role global developer -p ".*"')
+def instance = Jenkins.get()
 
-# PROJECT ROLES
-run_cli('add-role project sigma -p "^sigma-.*"')
-run_cli('add-role project issuing -p "^issuing-.*"')
-run_cli('add-role project acquiring -p "^acquiring-.*"')
-run_cli('add-role project upi -p "^upi-.*"')
-run_cli('add-role project api-gw -p "^api-gw-.*"')
+def strategy = instance.getAuthorizationStrategy()
 
-print("Roles created successfully")
+if (!(strategy instanceof RoleBasedAuthorizationStrategy)) {
+    println "Role strategy not enabled!"
+    return
+}
+
+def globalRoleMap = strategy.getRoleMap(RoleBasedAuthorizationStrategy.GLOBAL)
+def projectRoleMap = strategy.getRoleMap(RoleBasedAuthorizationStrategy.PROJECT)
+
+def createRole(roleName, pattern, permissions, roleMap) {
+    def role = new Role(roleName, pattern, permissions)
+    if (!roleMap.getRoles().contains(role)) {
+        roleMap.addRole(role)
+        println "Created role: ${roleName}"
+    } else {
+        println "Role already exists: ${roleName}"
+    }
+}
+
+def adminPerms = [
+    Jenkins.ADMINISTER
+] as Set
+
+def devopsPerms = [
+    Jenkins.READ,
+    Item.READ,
+    Item.BUILD,
+    Item.CONFIGURE,
+    Item.DELETE
+] as Set
+
+def developerPerms = [
+    Jenkins.READ,
+    Item.READ,
+    Item.BUILD
+] as Set
+
+createRole("admin", ".*", adminPerms, globalRoleMap)
+createRole("devops", ".*", devopsPerms, globalRoleMap)
+createRole("developer", ".*", developerPerms, globalRoleMap)
+
+instance.save()
+println "Roles configured successfully"
+"""
+
+with open("roles.groovy", "w") as f:
+    f.write(textwrap.dedent(groovy_script))
+
+cmd = f"""
+java -jar jenkins-cli.jar -s {JENKINS_URL} \
+-auth {ADMIN_USER}:{ADMIN_TOKEN} groovy = < roles.groovy
+"""
+
+subprocess.run(cmd, shell=True)
