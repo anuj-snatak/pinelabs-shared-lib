@@ -10,12 +10,19 @@ class user_onboarding implements Serializable {
 
     void execute() {
 
-        //IMPORTANT FIX
+        // ==============================
+        // 1️⃣ Checkout Repo (users.csv)
+        // ==============================
         steps.stage("Checkout SCM") {
             steps.checkout(steps.scm)
         }
 
-        steps.stage("Load Python Script") {
+        // ==============================
+        // 2️⃣ Load Python Scripts
+        // ==============================
+        steps.stage("Load Python Scripts") {
+
+            // Load onboarding script
             steps.libraryResource("user-onboarding.py")
                 .with { content ->
                     steps.writeFile(
@@ -23,8 +30,20 @@ class user_onboarding implements Serializable {
                         text: content
                     )
                 }
+
+            // Load role setup script
+            steps.libraryResource("role-setup.py")
+                .with { content ->
+                    steps.writeFile(
+                        file: "role-setup.py",
+                        text: content
+                    )
+                }
         }
 
+        // ==============================
+        // 3️⃣ Setup Python Environment
+        // ==============================
         steps.stage("Setup Python") {
             steps.sh """
                 python3 -m venv venv
@@ -33,6 +52,36 @@ class user_onboarding implements Serializable {
             """
         }
 
+        // ==============================
+        // 4️⃣ Setup Roles (RBAC Automation)
+        // ==============================
+        steps.stage("Setup Roles") {
+
+            steps.withCredentials([
+                steps.string(
+                    credentialsId: config.adminCreds,
+                    variable: 'ADMIN_TOKEN'
+                )
+            ]) {
+
+                steps.withEnv([
+                    "JENKINS_URL=${config.jenkinsUrl}",
+                    "ADMIN_USER=${config.adminUser}",
+                    "ADMIN_TOKEN=${steps.env.ADMIN_TOKEN}"
+                ]) {
+
+                    steps.sh """
+                        . venv/bin/activate
+                        curl -s -o jenkins-cli.jar ${config.jenkinsUrl}/jnlpJars/jenkins-cli.jar
+                        python role-setup.py
+                    """
+                }
+            }
+        }
+
+        // ==============================
+        // 5️⃣ Run User Onboarding
+        // ==============================
         steps.stage("Run Onboarding") {
 
             steps.withCredentials([
