@@ -19,7 +19,7 @@ roles_config = {
 
 groovy_script = """
 import jenkins.model.*
-import com.michelin.cio.hudson.plugins.rolestrategy.*
+import com.synopsys.arc.jenkins.plugins.rolestrategy.*
 import hudson.security.*
 
 def jenkins = Jenkins.instance
@@ -30,7 +30,7 @@ if (!(strategy instanceof RoleBasedAuthorizationStrategy)) {
     return
 }
 
-def roleMap = strategy.getRoleMap(RoleBasedAuthorizationStrategy.PROJECT)
+def roleMap = strategy.getRoleMap(RoleType.Project)
 
 """
 
@@ -51,7 +51,7 @@ if (!roleMap.getRole("{role}")) {{
 
 groovy_script += """
 jenkins.save()
-println("Role setup completed.")
+println("Role setup completed successfully.")
 """
 
 response = requests.post(
