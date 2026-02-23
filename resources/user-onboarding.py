@@ -1,82 +1,178 @@
+import requests
+import json
 import os
 import csv
-import requests
-import secrets
+import random
 import string
+import logging
 
-JENKINS_URL = os.getenv("JENKINS_URL")
-ADMIN_USER = os.getenv("ADMIN_USER")
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
-MODE = os.getenv("MODE")
-USER_EMAIL = os.getenv("USER_EMAIL")
-ROLES = os.getenv("ROLES")
-SEND_EMAIL = os.getenv("SEND_EMAIL") == "true"
+# ==========================
+# ENV VARIABLES
+# ==========================
 
-def generate_password():
-    chars = string.ascii_letters + string.digits + "!@#$%"
-    return ''.join(secrets.choice(chars) for _ in range(12))
+JENKINS_URL = os.environ.get("JENKINS_URL")
+ADMIN_USER = os.environ.get("ADMIN_USER")
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")
 
-def create_user(username, password, email):
+MODE = os.environ.get("MODE")
+USER_EMAIL = os.environ.get("USER_EMAIL")
+ROLES = os.environ.get("ROLES")
+
+logging.basicConfig(level=logging.INFO)
+
+# ==========================
+# PASSWORD GENERATOR
+# ==========================
+
+def generate_password(length=12):
+    chars = string.ascii_letters + string.digits + "!@#$%^&*"
+    return ''.join(random.choice(chars) for _ in range(length))
+
+
+# ==========================
+# CREATE JENKINS USER
+# ==========================
+
+def create_user(username, password):
     url = f"{JENKINS_URL}/securityRealm/createAccountByAdmin"
-    data = {
+
+    payload = {
         "username": username,
         "password1": password,
         "password2": password,
         "fullname": username,
-        "email": email
+        "email": f"{username}@pinelabs.com"
     }
-    r = requests.post(url,
-                      auth=(ADMIN_USER, ADMIN_TOKEN),
-                      data=data,
-                      allow_redirects=False)
-    if r.status_code == 302:
-        print(f"User created: {username}")
+
+    response = requests.post(
+        url,
+        data=payload,
+        auth=(ADMIN_USER, ADMIN_TOKEN)
+    )
+
+    if response.status_code in [200, 302]:
+        logging.info(f"User created: {username}")
     else:
-        print(f"User may already exist: {username}")
+        logging.error(f"User creation failed: {response.text}")
+
+
+# ==========================
+# ASSIGN ROLE (ROLE STRATEGY)
+# ==========================
 
 def assign_role(username, role):
-    script = f'''
-import jenkins.model.*
-import com.michelin.cio.hudson.plugins.rolestrategy.*
+    url = f"{JENKINS_URL}/role-strategy/strategy/assignRole"
 
-def strategy = Jenkins.instance.getAuthorizationStrategy()
-strategy.doAssignUserRole(
-    RoleBasedAuthorizationStrategy.GLOBAL,
-    "{role}",
-    "{username}"
-)
-Jenkins.instance.save()
-'''
-    requests.post(f"{JENKINS_URL}/scriptText",
-                  auth=(ADMIN_USER, ADMIN_TOKEN),
-                  data={"script": script})
+    payload = {
+        "type": "globalRoles",
+        "roleName": role,
+        "sid": username
+    }
 
-def process_user(username, email, roles):
-    password = generate_password()
-    create_user(username, password, email)
+    response = requests.post(
+        url,
+        data=payload,
+        auth=(ADMIN_USER, ADMIN_TOKEN)
+    )
 
-    for role in roles.split(","):
-        assign_role(username, role.strip())
+    if response.status_code in [200, 302]:
+        logging.info(f"Assigned role {role} to {username}")
+    else:
+        logging.error(f"Role assignment failed: {response.text}")
 
-    print(f"Username: {username}")
-    print(f"Roles: {roles}")
-    print(f"Password: {password}")
 
-def bulk_mode():
-    with open("users.csv") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            process_user(
-                row["username"],
-                row["email"],
-                row["roles"]
-            )
+# ==========================
+# STORE PASSWORD AS CREDENTIAL
+# ==========================
+
+def store_password_as_credential(username, password):
+    credential_id = f"user-{username}-cred"
+
+    url = f"{JENKINS_URL}/credentials/store/system/domain/_/createCredentials"
+
+    payload = {
+        "": "0",
+        "credentials": {
+            "scope": "GLOBAL",
+            "id": credential_id,
+            "description": f"Password for {username}",
+            "$class": "org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl",
+            "secret": password
+        }
+    }
+
+    headers = {"Content-Type": "application/json"}
+
+    response = requests.post(
+        url,
+        auth=(ADMIN_USER, ADMIN_TOKEN),
+        headers=headers,
+        data=json.dumps(payload)
+    )
+
+    if response.status_code in [200, 201]:
+        logging.info(f"Credential stored: {credential_id}")
+    else:
+        logging.error(f"Credential store failed: {response.text}")
+
+
+# ==========================
+# SINGLE MODE
+# ==========================
 
 def single_mode():
-    username = USER_EMAIL.split("@")[0]
-    process_user(username, USER_EMAIL, ROLES)
+    if not USER_EMAIL or not ROLES:
+        logging.error("USER_EMAIL or ROLES missing")
+        return
 
-if MODE == "bulk":
-    bulk_mode()
-else:
-    single_mode()
+    username = USER_EMAIL.split("@")[0]
+    password = generate_password()
+
+    create_user(username, password)
+    assign_role(username, ROLES.lower())
+    store_password_as_credential(username, password)
+
+    logging.info(f"User created successfully: {username}")
+    logging.info(f"Credential ID: user-{username}-cred")
+
+
+# ==========================
+# BULK MODE
+# ==========================
+
+def bulk_mode():
+    try:
+        with open("users.csv") as f:
+            reader = csv.DictReader(f)
+
+            for row in reader:
+                email = row["email"]
+                role = row["roles"]
+
+                username = email.split("@")[0]
+                password = generate_password()
+
+                create_user(username, password)
+                assign_role(username, role.lower())
+                store_password_as_credential(username, password)
+
+                logging.info(f"User created successfully: {username}")
+                logging.info(f"Credential ID: user-{username}-cred")
+
+        logging.info("Bulk onboarding completed.")
+
+    except FileNotFoundError:
+        logging.error("users.csv not found in workspace.")
+
+
+# ==========================
+# MAIN
+# ==========================
+
+if __name__ == "__main__":
+    if MODE == "single":
+        single_mode()
+    elif MODE == "bulk":
+        bulk_mode()
+    else:
+        logging.error("Invalid MODE. Use single or bulk.")
