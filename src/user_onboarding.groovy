@@ -10,7 +10,7 @@ class user_onboarding implements Serializable {
 
     void execute() {
 
-        // ✅ IMPORTANT FIX
+        //IMPORTANT FIX
         steps.stage("Checkout SCM") {
             steps.checkout(steps.scm)
         }
