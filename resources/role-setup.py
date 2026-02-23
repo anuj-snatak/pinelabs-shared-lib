@@ -1,112 +1,63 @@
 import os
-import subprocess
+import requests
+from requests.auth import HTTPBasicAuth
 
 JENKINS_URL = os.getenv("JENKINS_URL")
 ADMIN_USER = os.getenv("ADMIN_USER")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 
-CLI_JAR = "jenkins-cli.jar"
-
-ROLES = {
-    "admin": {
-        "pattern": ".*",
-        "permissions": [
-            "Overall/Administer"
-        ]
-    },
-    "devops": {
-        "pattern": ".*",
-        "permissions": [
-            "Overall/Read",
-            "Job/Build",
-            "Job/Cancel",
-            "Job/Read",
-            "Job/Configure"
-        ]
-    },
-    "developer": {
-        "pattern": ".*",
-        "permissions": [
-            "Overall/Read",
-            "Job/Read"
-        ]
-    },
-    "sigma": {
-        "pattern": "^sigma-.*",
-        "permissions": [
-            "Job/Read",
-            "Job/Build",
-            "Job/Cancel"
-        ]
-    },
-    "issuing": {
-        "pattern": "^issuing-.*",
-        "permissions": [
-            "Job/Read",
-            "Job/Build",
-            "Job/Cancel"
-        ]
-    },
-    "acquiring": {
-        "pattern": "^acquiring-.*",
-        "permissions": [
-            "Job/Read",
-            "Job/Build",
-            "Job/Cancel"
-        ]
-    },
-    "upi": {
-        "pattern": "^upi-.*",
-        "permissions": [
-            "Job/Read",
-            "Job/Build",
-            "Job/Cancel"
-        ]
-    },
-    "api-gw": {
-        "pattern": "^api-gw-.*",
-        "permissions": [
-            "Job/Read",
-            "Job/Build",
-            "Job/Cancel"
-        ]
-    }
+roles_config = {
+    "admin": ".*",
+    "devops": ".*",
+    "developer": ".*",
+    "sigma": "^sigma-.*",
+    "issuing": "^issuing-.*",
+    "acquiring": "^acquiring-.*",
+    "upi": "^upi-.*",
+    "api-gw": "^api-gw-.*"
 }
 
-def run_cli(command):
-    full_cmd = [
-        "java", "-jar", CLI_JAR,
-        "-s", JENKINS_URL,
-        "-auth", f"{ADMIN_USER}:{ADMIN_TOKEN}"
-    ] + command
+groovy_script = """
+import jenkins.model.*
+import com.michelin.cio.hudson.plugins.rolestrategy.*
+import hudson.security.*
 
-    subprocess.run(full_cmd, check=True)
+def jenkins = Jenkins.instance
+def strategy = jenkins.getAuthorizationStrategy()
 
-def create_roles():
-    for role, data in ROLES.items():
-        try:
-            print(f"Creating role: {role}")
-            run_cli([
-                "create-role",
-                "projectRoles",
-                role,
-                data["pattern"]
-            ])
-        except:
-            print(f"Role {role} may already exist.")
+if (!(strategy instanceof RoleBasedAuthorizationStrategy)) {
+    println("ERROR: Role-Based Strategy not enabled.")
+    return
+}
 
-        for perm in data["permissions"]:
-            try:
-                run_cli([
-                    "assign-permission",
-                    "projectRoles",
-                    role,
-                    perm
-                ])
-            except:
-                pass
+def roleMap = strategy.getRoleMap(RoleBasedAuthorizationStrategy.PROJECT)
 
-    print("All roles configured successfully.")
+"""
 
-if __name__ == "__main__":
-    create_roles()
+for role, pattern in roles_config.items():
+    groovy_script += f"""
+if (!roleMap.getRole("{role}")) {{
+    def permissions = new HashSet()
+    permissions.add(hudson.model.Item.READ)
+    permissions.add(hudson.model.Item.BUILD)
+    permissions.add(hudson.model.Item.CANCEL)
+    def newRole = new Role("{role}", "{pattern}", permissions)
+    roleMap.addRole(newRole)
+    println("Created role: {role}")
+}} else {{
+    println("Role already exists: {role}")
+}}
+"""
+
+groovy_script += """
+jenkins.save()
+println("Role setup completed.")
+"""
+
+response = requests.post(
+    f"{JENKINS_URL}/scriptText",
+    auth=HTTPBasicAuth(ADMIN_USER, ADMIN_TOKEN),
+    data={"script": groovy_script}
+)
+
+print(response.text)
