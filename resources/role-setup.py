@@ -7,10 +7,9 @@ ADMIN_USER  = os.environ.get("ADMIN_USER", "admin")
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")
 
 if not ADMIN_TOKEN:
-    print("ERROR: ADMIN_TOKEN environment variable not set")
+    print("ERROR: ADMIN_TOKEN not set")
     sys.exit(1)
 
-# This is the Groovy script sent to Jenkins Script Console
 GROOVY_SCRIPT = """
 import jenkins.model.*
 import hudson.security.*
@@ -35,27 +34,15 @@ def createRole = { roleName, pattern, permissions, roleMap ->
     def role = new Role(roleName, pattern, permissions)
     if (!roleMap.getRoles().any { it.name == roleName }) {
         roleMap.addRole(role)
-        println "Created role: ${roleName}"
+        println "Created role: " + roleName
     } else {
-        println "Role already exists: ${roleName}"
+        println "Role already exists: " + roleName
     }
 }
 
-def adminPerms = [Hudson.ADMINISTER] as Set
-
-def devopsPerms = [
-    Hudson.READ,
-    Item.READ,
-    Item.BUILD,
-    Item.CONFIGURE,
-    Item.DELETE
-] as Set
-
-def developerPerms = [
-    Hudson.READ,
-    Item.READ,
-    Item.BUILD
-] as Set
+def adminPerms     = [Hudson.ADMINISTER] as Set
+def devopsPerms    = [Hudson.READ, Item.READ, Item.BUILD, Item.CONFIGURE, Item.DELETE] as Set
+def developerPerms = [Hudson.READ, Item.READ, Item.BUILD] as Set
 
 createRole("admin",     ".*",            adminPerms,     globalRoleMap)
 createRole("devops",    ".*",            devopsPerms,    globalRoleMap)
@@ -71,26 +58,23 @@ println "Roles configured successfully"
 """
 
 def get_crumb(session):
-    """Fetch Jenkins CSRF crumb"""
     resp = session.get(f"{JENKINS_URL}/crumbIssuer/api/json")
     if resp.status_code == 200:
         data = resp.json()
         return {data["crumbRequestField"]: data["crumb"]}
-    return {}  # Some Jenkins configs disable crumb
+    return {}
 
-def run_groovy(groovy_script):
+def run_groovy():
     session = requests.Session()
     session.auth = (ADMIN_USER, ADMIN_TOKEN)
-
     crumb = get_crumb(session)
-
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     headers.update(crumb)
 
     resp = session.post(
         f"{JENKINS_URL}/scriptText",
         headers=headers,
-        data={"script": groovy_script}
+        data={"script": GROOVY_SCRIPT}
     )
 
     if resp.status_code == 200:
@@ -99,9 +83,9 @@ def run_groovy(groovy_script):
             print("Groovy script reported an error.")
             sys.exit(1)
     else:
-        print(f"Failed to run script. HTTP {resp.status_code}: {resp.text}")
+        print(f"HTTP {resp.status_code}: {resp.text}")
         sys.exit(1)
 
 if __name__ == "__main__":
-    print("Running role setup via Jenkins Script Console...")
-    run_groovy(GROOVY_SCRIPT)
+    print("Setting up roles via Jenkins Script Console...")
+    run_groovy()
