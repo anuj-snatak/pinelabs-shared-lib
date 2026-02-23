@@ -6,62 +6,72 @@ ADMIN_USER = os.getenv("ADMIN_USER", "admin")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 
 groovy_script = """
-import jenkins.model.*
-import hudson.security.*
-import com.synopsys.arc.jenkins.plugins.rolestrategy.*
-import com.synopsys.arc.jenkins.plugins.rolestrategy.RoleType
+import jenkins.model.Jenkins
 
-def instance = Jenkins.getInstance()
+def instance = Jenkins.get()
+
 def strategy = instance.getAuthorizationStrategy()
 
-if (!(strategy instanceof RoleBasedAuthorizationStrategy)) {
+if (!(strategy.getClass().getName().contains("RoleBasedAuthorizationStrategy"))) {
     println "Role-Based Strategy not enabled!"
     return
 }
 
-def globalRoleMap = strategy.getRoleMap(RoleType.Global)
-def projectRoleMap = strategy.getRoleMap(RoleType.Project)
+def globalRoleMap = strategy.getRoleMap(
+    com.synopsys.arc.jenkins.plugins.rolestrategy.RoleType.Global
+)
 
-def createRole(roleName, pattern, permissionsList, type) {
-    def permissions = permissionsList.collect { Permission.fromId(it) }
-    def role = new Role(roleName, pattern, permissions)
-    def roleMap = (type == "global") ? globalRoleMap : projectRoleMap
+def projectRoleMap = strategy.getRoleMap(
+    com.synopsys.arc.jenkins.plugins.rolestrategy.RoleType.Project
+)
+
+def createRole(roleName, pattern, permissionsList, roleMap) {
+    def permissions = permissionsList.collect {
+        hudson.security.Permission.fromId(it)
+    }
+
+    def role = new com.synopsys.arc.jenkins.plugins.rolestrategy.Role(
+        roleName,
+        pattern,
+        permissions
+    )
+
     roleMap.addRole(role)
 }
 
 createRole("admin", ".*",
-    ["hudson.model.Hudson.Administer"], "global")
+    ["hudson.model.Hudson.Administer"], globalRoleMap)
 
 createRole("devops", ".*",
     ["hudson.model.Hudson.Read",
      "hudson.model.Item.Build",
      "hudson.model.Item.Configure",
-     "hudson.model.Item.Read"], "global")
+     "hudson.model.Item.Read"], globalRoleMap)
 
 createRole("developer", ".*",
     ["hudson.model.Hudson.Read",
      "hudson.model.Item.Build",
-     "hudson.model.Item.Read"], "global")
+     "hudson.model.Item.Read"], globalRoleMap)
 
 createRole("sigma", "^sigma-.*",
     ["hudson.model.Item.Build",
-     "hudson.model.Item.Read"], "project")
+     "hudson.model.Item.Read"], projectRoleMap)
 
 createRole("issuing", "^issuing-.*",
     ["hudson.model.Item.Build",
-     "hudson.model.Item.Read"], "project")
+     "hudson.model.Item.Read"], projectRoleMap)
 
 createRole("acquiring", "^acquiring-.*",
     ["hudson.model.Item.Build",
-     "hudson.model.Item.Read"], "project")
+     "hudson.model.Item.Read"], projectRoleMap)
 
 createRole("upi", "^upi-.*",
     ["hudson.model.Item.Build",
-     "hudson.model.Item.Read"], "project")
+     "hudson.model.Item.Read"], projectRoleMap)
 
 createRole("api-gw", "^api-gw-.*",
     ["hudson.model.Item.Build",
-     "hudson.model.Item.Read"], "project")
+     "hudson.model.Item.Read"], projectRoleMap)
 
 instance.save()
 println "Roles created successfully"
