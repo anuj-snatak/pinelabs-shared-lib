@@ -1,5 +1,4 @@
 import requests
-import json
 import os
 import csv
 import random
@@ -19,6 +18,7 @@ USER_EMAIL = os.environ.get("USER_EMAIL")
 ROLES = os.environ.get("ROLES")
 
 logging.basicConfig(level=logging.INFO)
+
 
 # ==========================
 # PASSWORD GENERATOR
@@ -108,44 +108,28 @@ def assign_role(username, role):
 
 
 # ==========================
-# STORE PASSWORD AS CREDENTIAL
+# STORE PASSWORD IN JENKINS PATH
 # ==========================
 
-def store_password_as_credential(username, password):
-    credential_id = f"user-{username}-cred"
+def store_password_in_path(username, password, role):
+    base_path = "/var/lib/jenkins/user-secrets"
 
-    crumb_field, crumb = get_crumb()
+    try:
+        os.makedirs(base_path, exist_ok=True)
 
-    url = f"{JENKINS_URL}/credentials/store/system/domain/_/createCredentials"
+        file_path = f"{base_path}/{username}.txt"
 
-    headers = {crumb_field: crumb} if crumb else {}
+        with open(file_path, "w") as f:
+            f.write(f"username: {username}\n")
+            f.write(f"password: {password}\n")
+            f.write(f"role: {role}\n")
 
-    credential_payload = {
-        "": "0",
-        "credentials": {
-            "scope": "GLOBAL",
-            "id": credential_id,
-            "description": f"Password for {username}",
-            "$class": "org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl",
-            "secret": password
-        }
-    }
+        os.chmod(file_path, 0o600)
 
-    data = {
-        "json": json.dumps(credential_payload)
-    }
+        logging.info(f"Credentials stored at: {file_path}")
 
-    response = requests.post(
-        url,
-        headers=headers,
-        data=data,
-        auth=(ADMIN_USER, ADMIN_TOKEN)
-    )
-
-    if response.status_code in [200, 302]:
-        logging.info(f"Credential stored: {credential_id}")
-    else:
-        logging.error(f"Credential store failed: {response.text}")
+    except Exception as e:
+        logging.error(f"Failed to store credentials: {e}")
 
 
 # ==========================
@@ -162,10 +146,9 @@ def single_mode():
 
     create_user(username, password)
     assign_role(username, ROLES.lower())
-    store_password_as_credential(username, password)
+    store_password_in_path(username, password, ROLES.lower())
 
     logging.info(f"User created successfully: {username}")
-    logging.info(f"Credential ID: user-{username}-cred")
 
 
 # ==========================
@@ -186,10 +169,9 @@ def bulk_mode():
 
                 create_user(username, password)
                 assign_role(username, role.lower())
-                store_password_as_credential(username, password)
+                store_password_in_path(username, password, role.lower())
 
                 logging.info(f"User created successfully: {username}")
-                logging.info(f"Credential ID: user-{username}-cred")
 
         logging.info("Bulk onboarding completed.")
 
