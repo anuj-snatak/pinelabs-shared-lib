@@ -2,10 +2,16 @@ import os
 import requests
 from requests.auth import HTTPBasicAuth
 
+# Environment Variables
 JENKINS_URL = os.getenv("JENKINS_URL")
 ADMIN_USER = os.getenv("ADMIN_USER")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 
+if not JENKINS_URL or not ADMIN_USER or not ADMIN_TOKEN:
+    print("ERROR: Missing Jenkins environment variables.")
+    exit(1)
+
+# Roles Configuration (Role Name → Job Pattern)
 roles_config = {
     "admin": ".*",
     "devops": ".*",
@@ -17,9 +23,13 @@ roles_config = {
     "api-gw": "^api-gw-.*"
 }
 
+# -------------------------------
+# Groovy Script (Executed in Jenkins Script Console)
+# -------------------------------
+
 groovy_script = """
 import jenkins.model.*
-import com.michelin.cio.hudson.plugins.rolestrategy.*
+import com.synopsys.arc.jenkins.plugins.rolestrategy.*
 import hudson.security.*
 
 def jenkins = Jenkins.get()
@@ -30,8 +40,7 @@ if (!(strategy instanceof RoleBasedAuthorizationStrategy)) {
     return
 }
 
-def roleMap = strategy.getRoleMap(RoleBasedAuthorizationStrategy.PROJECT)
-
+def roleMap = strategy.getRoleMap(RoleType.Project)
 """
 
 for role, pattern in roles_config.items():
@@ -55,10 +64,19 @@ jenkins.save()
 println("Role setup completed successfully.")
 """
 
-response = requests.post(
-    f"{JENKINS_URL}/scriptText",
-    auth=HTTPBasicAuth(ADMIN_USER, ADMIN_TOKEN),
-    data={"script": groovy_script}
-)
+# -------------------------------
+# Execute Groovy Script via Jenkins API
+# -------------------------------
 
-print(response.text)
+try:
+    response = requests.post(
+        f"{JENKINS_URL}/scriptText",
+        auth=HTTPBasicAuth(ADMIN_USER, ADMIN_TOKEN),
+        data={"script": groovy_script},
+        timeout=30
+    )
+
+    print(response.text)
+
+except Exception as e:
+    print("ERROR executing role setup:", str(e))
