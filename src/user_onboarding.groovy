@@ -10,6 +10,11 @@ class user_onboarding implements Serializable {
 
     void execute() {
 
+        // ✅ IMPORTANT FIX
+        steps.stage("Checkout SCM") {
+            steps.checkout(steps.scm)
+        }
+
         steps.stage("Load Python Script") {
             steps.libraryResource("user-onboarding.py")
                 .with { content ->
