@@ -19,10 +19,10 @@ roles_config = {
 
 groovy_script = """
 import jenkins.model.*
-import com.synopsys.arc.jenkins.plugins.rolestrategy.*
+import com.michelin.cio.hudson.plugins.rolestrategy.*
 import hudson.security.*
 
-def jenkins = Jenkins.instance
+def jenkins = Jenkins.get()
 def strategy = jenkins.getAuthorizationStrategy()
 
 if (!(strategy instanceof RoleBasedAuthorizationStrategy)) {
@@ -30,7 +30,7 @@ if (!(strategy instanceof RoleBasedAuthorizationStrategy)) {
     return
 }
 
-def roleMap = strategy.getRoleMap(RoleType.Project)
+def roleMap = strategy.getRoleMap(RoleBasedAuthorizationStrategy.PROJECT)
 
 """
 
@@ -41,6 +41,7 @@ if (!roleMap.getRole("{role}")) {{
     permissions.add(hudson.model.Item.READ)
     permissions.add(hudson.model.Item.BUILD)
     permissions.add(hudson.model.Item.CANCEL)
+
     def newRole = new Role("{role}", "{pattern}", permissions)
     roleMap.addRole(newRole)
     println("Created role: {role}")
