@@ -46,7 +46,7 @@ def get_crumb():
 
 
 # ==========================
-# ✅ CHECK IF USER EXISTS
+# CHECK IF USER EXISTS
 # ==========================
 
 def user_exists(username):
@@ -60,7 +60,6 @@ def user_exists(username):
 # ==========================
 
 def create_user(username, password):
-    # ✅ Layer 2: Check against Jenkins before creating
     if user_exists(username):
         logging.warning(f"User already exists in Jenkins, skipping: {username}")
         return False
@@ -144,7 +143,7 @@ def store_password_in_path(username, password, role):
 
 
 # ==========================
-# SINGLE MODE
+# SINGLE MODE ✅ UPDATED
 # ==========================
 
 def single_mode():
@@ -154,16 +153,22 @@ def single_mode():
 
     username = USER_EMAIL.split("@")[0]
 
-    # ✅ Duplicate check for single mode too
     if user_exists(username):
         logging.warning(f"User already exists, skipping: {username}")
         return
 
     password = generate_password()
-    create_user(username, password)
-    assign_role(username, ROLES.lower())
-    store_password_in_path(username, password, ROLES.lower())
-    logging.info(f"User created successfully: {username}")
+    created  = create_user(username, password)
+
+    if created:
+        # ✅ Multiple roles - split by comma
+        role_list = [r.strip().lower() for r in ROLES.split(",")]
+
+        for role in role_list:
+            assign_role(username, role)
+
+        store_password_in_path(username, password, ", ".join(role_list))
+        logging.info(f"User created successfully: {username} with roles: {role_list}")
 
 
 # ==========================
@@ -172,7 +177,7 @@ def single_mode():
 
 def bulk_mode():
     try:
-        seen_users = set()  # ✅ Layer 1: Track duplicates within CSV
+        seen_users = set()
 
         with open("users.csv") as f:
             reader = csv.DictReader(f)
@@ -182,7 +187,6 @@ def bulk_mode():
                 role     = row["roles"]
                 username = email.split("@")[0]
 
-                # ✅ Layer 1: Skip duplicate rows in CSV
                 if username in seen_users:
                     logging.warning(f"Duplicate entry in CSV, skipping: {username}")
                     continue
@@ -213,3 +217,4 @@ if __name__ == "__main__":
         bulk_mode()
     else:
         logging.error("Invalid MODE. Use single or bulk.")
+```
