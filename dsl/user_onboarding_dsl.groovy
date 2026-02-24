@@ -17,12 +17,6 @@ pipelineJob('Pinelabs/user-onboarding') {
     description('Onboard single or bulk users to Jenkins with role assignment and credential delivery')
 
     // ==========================
-    // DO NOT RUN CONCURRENT BUILDS
-    // ==========================
-
-    concurrentBuild(false)
-
-    // ==========================
     // PARAMETERS
     // ==========================
 
@@ -59,7 +53,6 @@ pipelineJob('Pinelabs/user-onboarding') {
 
     // ==========================
     // PIPELINE DEFINITION
-    // Points to Jenkinsfile in main repo
     // ==========================
 
     definition {
