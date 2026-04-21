@@ -7,7 +7,6 @@ folder('Pinelabs') {
     displayName('Pinelabs')
 }
 
-
 // ==========================
 // CREATE PIPELINE JOB INSIDE FOLDER
 // ==========================
